@@ -1,0 +1,10 @@
+# Grabaciones, transcripciones y configuración local (contenido privado)
+data/
+
+# Modelos de whisper (pesados, se descargan aparte)
+models/
+
+# Logs del server
+*.log
+
+node_modules/

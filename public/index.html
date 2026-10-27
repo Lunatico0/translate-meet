@@ -1,0 +1,840 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Grabador de reuniones</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a;
+    --text: #e6e8ee; --muted: #9aa3b2; --accent: #6ea8fe; --danger: #f2555a;
+    --ok: #3ecf8e; --warn: #f5b544;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--line);
+           display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 17px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel2);
+           color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }
+  button.danger { background: var(--danger); color: #fff; border-color: var(--danger); font-weight: 600; }
+  button.ghost { background: transparent; }
+  input, textarea { font: inherit; background: var(--panel2); color: var(--text);
+                    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
+  textarea { min-height: 420px; resize: vertical; font-family: ui-monospace, "Cascadia Code", monospace; font-size: 13.5px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .grid { display: grid; gap: 12px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .badge { font-size: 11px; text-transform: uppercase; letter-spacing: .6px;
+           padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.recorded { color: var(--warn); border-color: #4a3a14; }
+  .badge.transcribing { color: var(--accent); border-color: #24406e; }
+  .badge.transcribed { color: var(--ok); border-color: #1c4c38; }
+  .badge.done { color: var(--muted); }
+  .timer { font-variant-numeric: tabular-nums; font-size: 34px; font-weight: 700; letter-spacing: 1px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger);
+         animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  .item { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+          padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel2); }
+  .item:hover { border-color: var(--accent); }
+  .item .t { font-weight: 600; }
+  .split { display: grid; grid-template-columns: 220px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 820px) { .split { grid-template-columns: 1fr; } }
+  .outline a { display: block; color: var(--muted); text-decoration: none; padding: 3px 0; font-size: 13px; }
+  .outline a:hover { color: var(--accent); }
+  .outline a.d2 { padding-left: 12px; } .outline a.d3 { padding-left: 24px; }
+  audio { width: 100%; margin: 12px 0; }
+  .hide { display: none !important; }
+  .banner { padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); font-size: 13.5px; }
+  .banner.err { border-color: #5a2226; background: #2a1518; color: #ffb4b7; }
+  .banner.ok { border-color: #1c4c38; background: #10231c; color: #9fe6c6; }
+  .banner.warn { border-color: #4a3a14; background: #241d0e; color: #f5d493; }
+  .prev { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+          padding: 14px 18px; min-height: 420px; overflow-x: auto; }
+  .prev h1,.prev h2,.prev h3 { margin: 18px 0 8px; }
+  .prev h2 { font-size: 17px; border-bottom: 1px solid var(--line); padding-bottom: 5px; }
+  .prev h3 { font-size: 15px; }
+  .prev code { background: #0d1016; padding: 2px 5px; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Grabador de reuniones</h1>
+  <span class="muted" id="modelState">verificando modelo...</span>
+  <span style="flex:1"></span>
+  <button class="ghost" id="btnBack" onclick="showBoard()" hidden>← Volver</button>
+</header>
+
+<main>
+  <!-- ---------------------------------------------------------- BOARD -->
+  <section id="board">
+    <div class="card" style="margin-bottom:22px">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <span class="dot hide" id="dot"></span>
+          <span class="timer" id="timer">00:00</span>
+          <span class="muted" id="capHint"></span>
+        </div>
+        <div class="row">
+          <label class="muted">Tope
+            <input id="cap" type="number" min="1" max="240" step="5"
+                   style="width:72px;display:inline-block" onchange="saveCap()" /> min</label>
+          <button class="ghost" id="btnTest" onclick="testAudio()">Probar audio</button>
+          <button class="primary" id="btnRec" onclick="startRec()">● Grabar reunión</button>
+          <button class="danger hide" id="btnStop" onclick="stopRec()">■ Detener y guardar</button>
+        </div>
+      </div>
+
+      <!-- fuente de audio: pantalla (loopback, atado al ruteo) vs dispositivos (mezcla propia) -->
+      <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+        <div class="row" style="gap:18px">
+          <label class="row" style="gap:6px;cursor:pointer">
+            <input type="radio" name="src" value="devices" checked onchange="setSource('devices')"
+                   style="width:auto"> <b>Dispositivos de entrada</b>
+          </label>
+          <label class="row" style="gap:6px;cursor:pointer">
+            <input type="radio" name="src" value="screen" onchange="setSource('screen')"
+                   style="width:auto"> Compartir pantalla (audio del sistema)
+          </label>
+          <button class="ghost" onclick="loadDevices()" id="btnDevs">Refrescar dispositivos</button>
+        </div>
+
+        <div id="mixMsg" class="banner hide" style="margin-top:12px"></div>
+
+        <div id="devBox" style="margin-top:12px">
+          <div class="muted" style="margin-bottom:8px">
+            Marcá <b>todas</b> las fuentes que querés en la misma grabación. Se mezclan en una sola pista.
+          </div>
+          <div class="grid" id="devList" style="gap:6px"><span class="muted">cargando...</span></div>
+        </div>
+      </div>
+
+      <!-- medidor de nivel: sin esto grabás 90 min de silencio y te enterás al final -->
+      <div class="row" style="margin-top:14px;gap:10px">
+        <span class="muted" style="min-width:44px">Nivel</span>
+        <div style="flex:1;height:16px;background:#0d1016;border:1px solid var(--line);
+                    border-radius:8px;overflow:hidden">
+          <div id="meterBar" style="height:100%;width:0%;background:var(--ok);transition:width .07s linear"></div>
+        </div>
+        <span class="muted" id="meterTxt" style="min-width:150px;text-align:right">sin señal</span>
+      </div>
+
+      <div style="margin-top:14px">
+        <input id="title" placeholder="Título de la reunión (ej: Sync semanal Teams)" />
+      </div>
+      <div class="banner warn" style="margin-top:14px" id="recHelp">
+        Chrome te va a pedir qué compartir. Elegí <b>“Toda la pantalla”</b> y tildá
+        <b>“Compartir el audio del sistema”</b> abajo a la izquierda. Sin esa casilla el audio sale mudo.
+      </div>
+      <div id="routeMsg" class="banner hide" style="margin-top:12px"></div>
+      <div id="recMsg" class="banner err hide" style="margin-top:12px"></div>
+    </div>
+
+    <div class="row" style="justify-content:space-between;margin-bottom:12px">
+      <b>Grabaciones</b><button class="ghost" onclick="loadItems()">Actualizar</button>
+    </div>
+    <div class="grid" id="items"></div>
+  </section>
+
+  <!-- ---------------------------------------------------------- DETAIL -->
+  <section id="detail" hidden>
+    <div class="row" style="justify-content:space-between;margin-bottom:6px">
+      <h2 id="dTitle" style="margin:0;font-size:20px"></h2>
+      <span class="badge" id="dBadge"></span>
+    </div>
+    <div class="muted" id="dMeta"></div>
+    <audio id="player" controls preload="metadata"></audio>
+
+    <div id="dMsg" class="banner hide" style="margin:12px 0"></div>
+
+    <div class="card" style="margin:14px 0">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <button class="primary" id="btnTranscribe" onclick="transcribe()">Transcribir</button>
+          <button class="ghost" onclick="fmt('clean')" id="btnClean">Formatear con IA</button>
+          <button class="ghost" onclick="fmt('topics')" id="btnTopics">Dividir por temas</button>
+          <button class="ghost hide" id="btnUndo" onclick="undoFmt()">Deshacer</button>
+        </div>
+        <div class="row">
+          <span class="muted" id="saveState"></span>
+          <button onclick="saveBody()">Guardar</button>
+          <button class="ghost" onclick="markDone()">Marcar listo</button>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <input id="glossary" placeholder="Glosario para whisper: backend, frontend, VelaPOS, QR, Kubernetes" />
+        <div class="muted" style="margin-top:5px">
+          Sesga el reconocedor hacia tus términos. Se guarda como default del proyecto.
+        </div>
+      </div>
+    </div>
+
+    <div class="split">
+      <div>
+        <div class="card" style="padding:12px">
+          <b style="font-size:13px">Índice</b>
+          <div class="outline" id="outline"><span class="muted">sin secciones</span></div>
+        </div>
+        <div class="card" style="padding:12px;margin-top:12px">
+          <b style="font-size:13px">Corrección fija</b>
+          <div class="grid" style="margin-top:8px">
+            <input id="cFrom" placeholder="whisper escucha..." />
+            <input id="cTo" placeholder="...y debe decir" />
+            <button onclick="addCorrection()">Agregar y aplicar</button>
+          </div>
+          <div class="muted" id="cList" style="margin-top:10px"></div>
+        </div>
+      </div>
+      <div>
+        <div class="row" style="margin-bottom:8px">
+          <button id="tabEdit" onclick="setTab('edit')">Editar</button>
+          <button id="tabPrev" class="ghost" onclick="setTab('prev')">Vista previa</button>
+        </div>
+        <textarea id="body" onblur="saveBody()" oninput="renderOutline()"></textarea>
+        <div class="prev hide" id="prev"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// ============================================================ estado
+let stream = null, recorder = null, chunks = [], t0 = 0, tick = null, stopping = false;
+let capMinutes = 90, current = null, prevBody = null, tab = "edit", abortSilent = false;
+
+const $ = (id) => document.getElementById(id);
+const pad = (n) => String(n).padStart(2, "0");
+const mmss = (ms) => `${pad(Math.floor(ms / 60000))}:${pad(Math.floor(ms / 1000) % 60)}`;
+
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  const txt = await r.text();
+  let data = {};
+  try { data = txt ? JSON.parse(txt) : {}; } catch { data = { error: txt }; }
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+
+function msg(el, text, kind) {
+  el.className = `banner ${kind}`;
+  el.textContent = text;
+  el.classList.toggle("hide", !text);
+}
+
+// ============================================================ medidor de nivel
+let audioCtx = null, analyser = null, meterRaf = null, peakSeen = 0, silenceSince = 0;
+
+function startMeter(mediaStream) {
+  stopMeter();
+  audioCtx = new AudioContext();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  audioCtx.createMediaStreamSource(mediaStream).connect(analyser);
+  const buf = new Float32Array(analyser.fftSize);
+  peakSeen = 0;
+  silenceSince = Date.now();
+
+  const loop = () => {
+    analyser.getFloatTimeDomainData(buf);
+    let peak = 0;
+    for (const v of buf) { const a = Math.abs(v); if (a > peak) peak = a; }
+    if (peak > peakSeen) peakSeen = peak;
+
+    const db = peak > 0 ? 20 * Math.log10(peak) : -100;
+    const pct = Math.max(0, Math.min(100, ((db + 60) / 60) * 100)); // -60 dB .. 0 dB
+    $("meterBar").style.width = `${pct}%`;
+    $("meterBar").style.background = db > -3 ? "var(--danger)" : db > -45 ? "var(--ok)" : "var(--warn)";
+
+    if (db > -50) silenceSince = Date.now();
+    const quietMs = Date.now() - silenceSince;
+
+    if (db <= -60) {
+      $("meterTxt").textContent = quietMs > 4000 ? "SIN AUDIO ⚠" : "silencio";
+      $("meterTxt").style.color = quietMs > 4000 ? "var(--danger)" : "var(--muted)";
+    } else {
+      $("meterTxt").textContent = `${db.toFixed(0)} dB`;
+      $("meterTxt").style.color = "var(--ok)";
+    }
+    // GUARDA DURA: si en los primeros 15 s nunca entró señal, cortamos solos.
+    // Perder 40 minutos de silencio pasó una vez y no vuelve a pasar.
+    if (recorder?.state === "recording" && peakSeen <= 0.001 && Date.now() - t0 > 15000) {
+      abortSilent = true;
+      msg($("recMsg"),
+        "✗ CORTADO A LOS 15 SEGUNDOS: no entró NADA de audio. Chrome está escuchando un dispositivo por el que no pasa la reunión. Revisá el ruteo (ver más abajo) y usá “Probar audio” antes de volver a grabar.",
+        "err");
+      stopRec();
+      return;
+    }
+    // aviso si se queda mudo a mitad de camino, pero sin cortar (puede ser una pausa real)
+    if (recorder?.state === "recording" && quietMs > 20000 && peakSeen > 0.001) {
+      msg($("recMsg"), "⚠ 20 segundos sin audio. Si no es una pausa de la reunión, revisá el ruteo.", "warn");
+    }
+    meterRaf = requestAnimationFrame(loop);
+  };
+  loop();
+}
+
+function stopMeter() {
+  if (meterRaf) cancelAnimationFrame(meterRaf);
+  meterRaf = null;
+  audioCtx?.close().catch(() => {});
+  audioCtx = null; analyser = null;
+  $("meterBar").style.width = "0%";
+  $("meterTxt").textContent = "sin señal";
+  $("meterTxt").style.color = "var(--muted)";
+}
+
+/** Abre la fuente elegida, muestra el nivel 12 s y NO graba nada. Para validar antes de la meet. */
+async function testAudio() {
+  msg($("recMsg"), "", "err");
+  let mixed;
+  try {
+    mixed = await buildStream();
+  } catch (err) {
+    closeStreams();
+    return msg($("recMsg"), err.message, "err");
+  }
+  startMeter(mixed);
+  msg($("recMsg"), "Probando 12 segundos. Poné algo a sonar y mirá la barra.", "warn");
+  $("btnTest").disabled = true;
+  setTimeout(() => {
+    const ok = peakSeen > 0.001;
+    closeStreams();
+    stopMeter();
+    $("btnTest").disabled = false;
+    msg($("recMsg"),
+      ok ? "✓ Entra audio. Ya podés grabar tranquilo."
+         : "✗ CERO audio en 12 segundos. No grabes todavía: esa fuente no está recibiendo nada.",
+      ok ? "ok" : "err");
+  }, 12000);
+}
+
+// ============================================================ fuentes de audio
+let source = "devices";     // "devices" | "screen"
+let routeWarning = false;
+let liveStreams = [];       // streams crudos a cerrar al terminar
+let mixCtx = null;
+
+function setSource(s) {
+  source = s;
+  $("devBox").classList.toggle("hide", s !== "devices");
+  // el ruteo Console/Comunicaciones sólo importa en modo pantalla (loopback de Chrome)
+  $("recHelp").classList.toggle("hide", s !== "screen");
+  $("routeMsg").classList.toggle("hide", s !== "screen" || !routeWarning);
+}
+
+const AUDIO_CONSTRAINTS = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+
+async function loadDevices() {
+  // sin permiso otorgado, enumerateDevices devuelve labels vacíos
+  try {
+    const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+    probe.getTracks().forEach((t) => t.stop());
+  } catch (err) {
+    return msg($("recMsg"), `Chrome no dio permiso de audio: ${err.message}`, "err");
+  }
+  const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+  const saved = JSON.parse(localStorage.getItem("selectedDevs") || "[]");
+
+  $("devList").innerHTML = devs.length
+    ? devs.map((d) => {
+        const label = d.label || d.deviceId.slice(0, 12);
+        // sugerimos las fuentes que capturan la mezcla, no un micrófono suelto
+        const isMix = /stream|mix|cable|loopback|what u hear/i.test(label);
+        const on = saved.length ? saved.includes(d.deviceId) : isMix;
+        return `<label class="row" style="gap:8px;cursor:pointer;padding:4px 0">
+            <input type="checkbox" value="${d.deviceId}" ${on ? "checked" : ""}
+                   onchange="saveDevs()" style="width:auto">
+            <span>${esc(label)}</span>
+            ${isMix ? '<span class="badge transcribed">mezcla</span>' : ""}
+          </label>`;
+      }).join("")
+    : `<span class="muted">no hay entradas de audio</span>`;
+}
+
+function selectedDevs() {
+  return [...document.querySelectorAll("#devList input:checked")].map((i) => i.value);
+}
+
+function saveDevs() {
+  localStorage.setItem("selectedDevs", JSON.stringify(selectedDevs()));
+}
+
+/**
+ * Arma UNA pista mezclando todas las fuentes elegidas.
+ * Con dispositivos podemos combinar (mezcla del sistema + micrófono);
+ * con pantalla dependemos del ruteo de Windows y sólo viene una.
+ */
+async function buildStream() {
+  liveStreams = [];
+  if (source === "screen") {
+    // Chrome sólo ofrece el audio del sistema si además pedís video
+    const s = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 1 }, audio: AUDIO_CONSTRAINTS,
+    });
+    liveStreams.push(s);
+    if (!s.getAudioTracks().length) {
+      throw new Error("Compartiste la pantalla SIN audio del sistema. Tildá “Compartir el audio del sistema”.");
+    }
+    return new MediaStream(s.getAudioTracks());
+  }
+
+  const ids = selectedDevs();
+  if (!ids.length) throw new Error("No marcaste ninguna fuente de audio.");
+
+  mixCtx = new AudioContext();
+  const dest = mixCtx.createMediaStreamDestination();
+  const fallos = [];
+  for (const deviceId of ids) {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: deviceId }, ...AUDIO_CONSTRAINTS },
+      });
+      liveStreams.push(s);
+      mixCtx.createMediaStreamSource(s).connect(dest);
+    } catch (err) {
+      fallos.push(err.message);
+    }
+  }
+  if (!liveStreams.length) throw new Error(`No se pudo abrir ninguna fuente. ${fallos.join(" / ")}`);
+  if (fallos.length) msg($("recMsg"), `Algunas fuentes fallaron: ${fallos.join(" / ")}`, "warn");
+  return dest.stream;
+}
+
+function closeStreams() {
+  liveStreams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
+  liveStreams = [];
+  mixCtx?.close().catch(() => {});
+  mixCtx = null;
+}
+
+// ============================================================ grabación
+async function startRec() {
+  msg($("recMsg"), "", "err");
+  let mixed;
+  try {
+    mixed = await buildStream();
+  } catch (err) {
+    closeStreams();
+    return msg($("recMsg"), err.message, "err");
+  }
+  stream = mixed;
+  const audio = mixed.getAudioTracks();
+  startMeter(mixed);
+
+  // grabamos sólo el audio; la pista de video queda viva porque Chrome la necesita para el loopback
+  recorder = new MediaRecorder(new MediaStream(audio), {
+    mimeType: "audio/webm;codecs=opus",
+    audioBitsPerSecond: 128000,
+  });
+  chunks = [];
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = upload;
+  // si el usuario corta el compartir desde la barra de Chrome, cerramos prolijo
+  audio[0].onended = () => stopRec();
+  recorder.start(1000); // chunk por segundo: si algo explota, no perdemos todo
+
+  stopping = false;
+  t0 = Date.now();
+  $("btnRec").classList.add("hide");
+  $("btnStop").classList.remove("hide");
+  $("dot").classList.remove("hide");
+  $("title").disabled = true;
+  tick = setInterval(onTick, 1000);
+  onTick();
+}
+
+function onTick() {
+  const elapsed = Date.now() - t0;
+  const capMs = capMinutes * 60000;
+  $("timer").textContent = mmss(elapsed);
+  const left = capMs - elapsed;
+  $("capHint").textContent =
+    left <= 60000 ? `corta solo en ${mmss(Math.max(0, left))}` : `tope ${capMinutes} min`;
+  $("capHint").style.color = left <= 60000 ? "var(--warn)" : "var(--muted)";
+  if (elapsed >= capMs) stopRec();
+}
+
+function stopRec() {
+  if (stopping || !recorder) return;
+  stopping = true;                       // se dispara una sola vez
+  clearInterval(tick);
+  if (meterRaf) { cancelAnimationFrame(meterRaf); meterRaf = null; } // el peak se lee en upload()
+  if (recorder.state !== "inactive") recorder.stop();
+  closeStreams();
+  $("btnStop").disabled = true;
+  $("btnStop").textContent = "Guardando...";
+}
+
+async function upload() {
+  const durationMs = Date.now() - t0;
+  const silent = peakSeen <= 0.001;      // lo que midió el medidor durante toda la grabación
+
+  // abortada por silencio: no ensuciamos el disco con un archivo que no sirve
+  if (abortSilent) {
+    stopMeter();
+    resetRec();
+    return;
+  }
+  const blob = new Blob(chunks, { type: "audio/webm" });
+  stopMeter();
+  const title = $("title").value.trim() || `Reunión ${new Date().toLocaleString("es-AR")}`;
+  try {
+    const item = await api(
+      `/api/upload?title=${encodeURIComponent(title)}&durationMs=${durationMs}`,
+      { method: "POST", headers: { "content-type": "audio/webm" }, body: blob },
+    );
+    msg($("recMsg"),
+      silent
+        ? `Guardado "${item.title}" (${mmss(durationMs)}) PERO quedó MUDO: nunca entró señal. No sirve para transcribir.`
+        : `Guardado: ${item.title} (${mmss(durationMs)}). El audio está a salvo en disco.`,
+      silent ? "err" : "ok");
+  } catch (err) {
+    msg($("recMsg"), `ERROR al subir: ${err.message}. No cierres esta pestaña.`, "err");
+  }
+  resetRec();
+  loadItems();
+}
+
+async function saveCap() {
+  const v = Number($("cap").value);
+  if (!Number.isInteger(v) || v < 1) return;
+  capMinutes = v;
+  await api("/api/settings", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ maxRecordingMinutes: v }),
+  });
+}
+
+function resetRec() {
+  recorder = null; stream = null; chunks = []; stopping = false; abortSilent = false;
+  $("btnRec").classList.remove("hide");
+  $("btnStop").classList.add("hide");
+  $("btnStop").disabled = false;
+  $("btnStop").textContent = "■ Detener y guardar";
+  $("dot").classList.add("hide");
+  $("timer").textContent = "00:00";
+  $("capHint").textContent = "";
+  $("title").disabled = false;
+  $("title").value = "";
+}
+
+// ============================================================ board
+async function loadItems() {
+  const items = await api("/api/items");
+  $("items").innerHTML = items.length
+    ? items.map((i) => `
+      <div class="item">
+        <div>
+          <div class="t">${esc(i.title)}</div>
+          <div class="muted">${new Date(i.createdAt).toLocaleString("es-AR")}
+            ${i.durationMs ? " · " + mmss(i.durationMs) : ""}</div>
+        </div>
+        <div class="row">
+          <span class="badge ${i.status}">${i.status}</span>
+          <button onclick="openItem('${i.slug}')">Abrir</button>
+          <button class="ghost" onclick="del('${i.slug}',this)">Borrar</button>
+        </div>
+      </div>`).join("")
+    : `<div class="muted">Todavía no hay grabaciones.</div>`;
+}
+
+async function del(slug, btn) {
+  if (btn.dataset.armed !== "1") {
+    btn.dataset.armed = "1"; btn.textContent = "¿Seguro?"; btn.className = "danger";
+    setTimeout(() => { btn.dataset.armed = "0"; btn.textContent = "Borrar"; btn.className = "ghost"; }, 3000);
+    return;
+  }
+  await api(`/api/items/${slug}`, { method: "DELETE" });
+  loadItems();
+}
+
+function showBoard() {
+  $("board").hidden = false; $("detail").hidden = true; $("btnBack").hidden = true;
+  current = null; loadItems();
+}
+
+// ============================================================ detalle
+async function openItem(slug) {
+  current = await api(`/api/items/${slug}`);
+  $("board").hidden = true; $("detail").hidden = false; $("btnBack").hidden = false;
+  $("dTitle").textContent = current.title;
+  $("dBadge").textContent = current.status;
+  $("dBadge").className = `badge ${current.status}`;
+  $("dMeta").textContent =
+    `${new Date(current.createdAt).toLocaleString("es-AR")}` +
+    (current.durationMs ? ` · ${mmss(current.durationMs)}` : "") +
+    (current.language ? ` · ${current.language}` : "");
+  $("player").src = `/api/items/${slug}/audio`;
+  $("body").value = current.body || "";
+  prevBody = null;
+  $("btnUndo").classList.add("hide");
+  $("btnTranscribe").textContent = current.body ? "Re-transcribir" : "Transcribir";
+  renderOutline();
+  msg($("dMsg"), "", "");
+
+  // corrida colgada: transcribing sin proceso vivo => ofrecer reintento, nunca spinner eterno
+  if (current.status === "transcribing") {
+    msg($("dMsg"),
+      "Una transcripción quedó colgada (el server se reinició a mitad de camino). Podés reintentar; si ya había texto, se sobrescribe.",
+      "warn");
+  }
+  const s = await api("/api/settings");
+  $("glossary").value = s.transcriptionGlossary || "";
+  renderCorrections(s.transcriptionCorrections);
+}
+
+async function transcribe() {
+  const b = $("btnTranscribe");
+  b.disabled = true; b.textContent = "Transcribiendo... (puede tardar minutos)";
+  msg($("dMsg"), "whisper corriendo local. El audio no sale de esta máquina.", "warn");
+  try {
+    await api("/api/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ transcriptionGlossary: $("glossary").value }),
+    });
+    const r = await api(`/api/items/${current.slug}/transcribe`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ glossary: $("glossary").value }),
+    });
+    $("body").value = r.body;
+    current = { ...current, ...r };
+    $("dBadge").textContent = r.status; $("dBadge").className = `badge ${r.status}`;
+    renderOutline();
+    msg($("dMsg"), "Transcripción lista.", "ok");
+  } catch (err) {
+    msg($("dMsg"), `Falló la transcripción: ${err.message}`, "err");
+  }
+  b.disabled = false;
+  b.textContent = $("body").value ? "Re-transcribir" : "Transcribir";
+}
+
+// la IA PROPONE, el humano acepta: nada se persiste solo
+async function fmt(mode) {
+  const body = $("body").value;
+  if (!body.trim()) return msg($("dMsg"), "No hay transcripción para formatear.", "err");
+  const btn = mode === "topics" ? $("btnTopics") : $("btnClean");
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Procesando...";
+  try {
+    const r = await api(`/api/items/${current.slug}/format`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body, mode }),
+    });
+    prevBody = body;
+    $("body").value = r.body;
+    $("btnUndo").classList.remove("hide");
+    renderOutline();
+    msg($("dMsg"), "Propuesta de la IA cargada. Revisá y guardá, o deshacé.", "ok");
+  } catch (err) {
+    msg($("dMsg"), `Falló el formateo: ${err.message}`, "err");
+  }
+  btn.disabled = false; btn.textContent = label;
+}
+
+function undoFmt() {
+  if (prevBody === null) return;
+  $("body").value = prevBody;
+  prevBody = null;
+  $("btnUndo").classList.add("hide");
+  renderOutline();
+}
+
+async function saveBody() {
+  if (!current) return;
+  $("saveState").textContent = "guardando...";
+  try {
+    await api(`/api/items/${current.slug}/body`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: $("body").value }),
+    });
+    $("saveState").textContent = "guardado";
+    setTimeout(() => ($("saveState").textContent = ""), 2000);
+  } catch {
+    $("saveState").textContent = "error al guardar";
+  }
+}
+
+async function markDone() {
+  if (current.status === "done") return;
+  await saveBody();
+  const r = await api(`/api/items/${current.slug}/status`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ status: "done" }),
+  });
+  current = { ...current, ...r };
+  $("dBadge").textContent = "done"; $("dBadge").className = "badge done";
+  msg($("dMsg"), "Marcada como lista.", "ok");
+}
+
+// ============================================================ correcciones
+async function addCorrection() {
+  const from = $("cFrom").value.trim(), to = $("cTo").value.trim();
+  if (!from || !to) return;
+  const s = await api("/api/corrections", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ from, to }),
+  });
+  $("cFrom").value = ""; $("cTo").value = "";
+  renderCorrections(s.transcriptionCorrections);
+  // re-aplicamos la lista completa acá mismo para que el usuario vea el fix caer
+  $("body").value = applyCorrections($("body").value, s.transcriptionCorrections);
+  renderOutline();
+  saveBody();
+}
+
+function renderCorrections(list) {
+  $("cList").innerHTML = list.length
+    ? list.map((c) => `<div>${esc(c.from)} → <b>${esc(c.to)}</b></div>`).join("")
+    : "sin correcciones";
+}
+
+function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+function applyCorrections(text, pairs) {
+  let result = text;
+  for (const pair of pairs) {
+    if (!pair.from.trim()) continue;
+    // límites Unicode, no \b: \b rompe con acentos y alfabetos no latinos
+    const pattern = new RegExp(
+      `(?<![\\p{L}\\p{N}_])${escapeRegExp(pair.from)}(?![\\p{L}\\p{N}_])`, "giu");
+    result = result.replace(pattern, () => pair.to); // función, no string: $& en el target corrompe
+  }
+  return result;
+}
+
+// ============================================================ outline / preview
+function slugifyHeading(s) {
+  return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function headings(md) {
+  const out = []; let fence = false;
+  for (const line of md.split(/\r?\n/)) {
+    if (/^\s*```/.test(line)) { fence = !fence; continue; }
+    if (fence) continue;
+    const m = /^(#{1,3})\s+(.+)$/.exec(line); // depth 4+ ignorado; "#" sin espacio = hashtag
+    if (m) out.push({ depth: m[1].length, text: m[2].trim(), id: slugifyHeading(m[2].trim()) });
+  }
+  return out;
+}
+
+function renderOutline() {
+  const hs = headings($("body").value);
+  $("outline").innerHTML = hs.length >= 2
+    ? hs.map((h) => `<a class="d${h.depth}" href="#${h.id}" onclick="goto('${h.id}');return false">${esc(h.text)}</a>`).join("")
+    : `<span class="muted">sin secciones</span>`;
+  if (tab === "prev") renderPreview();
+}
+
+function goto(id) {
+  setTab("prev");
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function setTab(t) {
+  tab = t;
+  $("body").classList.toggle("hide", t !== "edit");
+  $("prev").classList.toggle("hide", t !== "prev");
+  $("tabEdit").className = t === "edit" ? "" : "ghost";
+  $("tabPrev").className = t === "prev" ? "" : "ghost";
+  if (t === "prev") renderPreview();
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function renderPreview() {
+  const md = $("body").value;
+  let html = "", fence = false;
+  for (const line of md.split(/\r?\n/)) {
+    if (/^\s*```/.test(line)) { html += fence ? "</pre>" : "<pre>"; fence = !fence; continue; }
+    if (fence) { html += esc(line) + "\n"; continue; }
+    const h = /^(#{1,3})\s+(.+)$/.exec(line);
+    if (h) {
+      const id = slugifyHeading(h[2].trim());
+      html += `<h${h[1].length} id="${id}">${inline(h[2])}</h${h[1].length}>`;
+    } else if (/^\s*-\s+\[[ x]\]\s+/.test(line)) {
+      const done = /\[x\]/i.test(line);
+      html += `<div>${done ? "☑" : "☐"} ${inline(line.replace(/^\s*-\s+\[[ x]\]\s+/i, ""))}</div>`;
+    } else if (/^\s*[-*]\s+/.test(line)) {
+      html += `<div style="padding-left:16px">• ${inline(line.replace(/^\s*[-*]\s+/, ""))}</div>`;
+    } else if (!line.trim()) html += "<div style='height:10px'></div>";
+    else html += `<div>${inline(line)}</div>`;
+  }
+  $("prev").innerHTML = html;
+}
+
+function inline(s) {
+  return esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\*([^*]+)\*/g, "<i>$1</i>");
+}
+
+// ============================================================ boot
+(async () => {
+  try {
+    const s = await api("/api/settings");
+    capMinutes = s.maxRecordingMinutes;
+    $("cap").value = capMinutes;
+    $("capHint").textContent = `tope ${capMinutes} min`;
+  } catch {}
+  // chequeo de ruteo: la causa real de los 34 minutos mudos
+  try {
+    const r = await api("/api/audio-endpoints");
+    if (r.mismatch === true) {
+      routeWarning = true;
+      msg($("routeMsg"),
+        `⛔ En modo pantalla vas a grabar SILENCIO: Chrome captura "${r.chromeHears}" pero Teams reproduce en "${r.commsGoesTo}". ` +
+        `Usá el modo "Dispositivos de entrada" (recomendado) o cambiá el altavoz de Teams a "${r.chromeHears}".`,
+        "err");
+    }
+    $("routeMsg").classList.toggle("hide", source !== "screen" || !routeWarning);
+
+    // el dispositivo de mezcla es la fuente ideal: una sola vez y se acabó el ruteo
+    if (r.mixDevice && !r.mixDevice.enabled) {
+      msg($("mixMsg"),
+        `Tenés "${r.mixDevice.name}" como dispositivo de mezcla, pero está DESHABILITADO. ` +
+        `Activalo (en Sonar: modo Streamer; o en Windows: Panel de sonido → Grabación → clic derecho → Habilitar) ` +
+        `y refrescá. Es la fuente que captura TODO sin importar por qué canal salga cada app.`,
+        "warn");
+    } else if (r.mixDevice?.enabled) {
+      msg($("mixMsg"), `✓ Dispositivo de mezcla disponible: "${r.mixDevice.name}". Marcalo en la lista.`, "ok");
+    }
+  } catch {}
+  setSource("devices");
+  await loadDevices();
+  try {
+    const h = await api("/api/health");
+    $("modelState").textContent = h.modelReady
+      ? `whisper listo (${(h.modelBytes / 1048576).toFixed(0)} MB)`
+      : "modelo whisper NO descargado";
+    $("modelState").style.color = h.modelReady ? "var(--ok)" : "var(--warn)";
+  } catch {}
+  loadItems();
+})();
+
+// no dejar que se cierre la pestaña con una grabación viva
+addEventListener("beforeunload", (e) => {
+  if (recorder && recorder.state === "recording") { e.preventDefault(); e.returnValue = ""; }
+});
+</script>
+</body>
+</html>
